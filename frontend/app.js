@@ -1,5 +1,5 @@
 // API Configuration
-const API_BASE_URL = 'https://track-opportunities.onrender.com';
+const API_BASE_URL = 'https://track-opportunities.onrender.com/api';
 
 // Global state
 let currentUser = null;
