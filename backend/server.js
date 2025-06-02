@@ -6,16 +6,7 @@ const bcrypt = require('bcryptjs');
 const admin = require('firebase-admin');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
-
-// Initialize Firebase Admin
-/*
-const serviceAccount = require('./serviceAccountKey.json');
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  databaseURL: "https://track-opportunities-default-rtdb.firebaseio.com"
-});
-
-*/
+ 
 
 admin.initializeApp({
   credential: admin.credential.cert({
@@ -39,7 +30,11 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Middleware
-app.use(cors());
+//app.use(cors());
+app.use(cors({
+  origin: "*",
+  allowedHeaders: ["Authorization", "Content-Type"]
+}));
 app.use(express.json());
 
 // Swagger configuration
@@ -51,7 +46,9 @@ const swaggerOptions = {
       version: '1.0.0',
       description: 'API for tracking opportunities with status management',
     },
-    servers: [{ url: `http://localhost:${PORT}`, description: 'Development server' }],
+    servers: [{ url: `http://localhost:${PORT}`, description: 'Development server' },
+        {url:'https://track-opportunities.onrender.com',description: 'Production Server'}
+    ],
     components: {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
