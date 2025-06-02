@@ -30,11 +30,13 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Middleware
-//app.use(cors());
+app.use(cors());
+/*
 app.use(cors({
   origin: "*",
   allowedHeaders: ["Authorization", "Content-Type"]
 }));
+*/
 app.use(express.json());
 
 // Swagger configuration
