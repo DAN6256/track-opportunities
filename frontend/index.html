@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Opportunity Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <h2 class="nav-logo">Opportunity Tracker</h2>
+            <div class="nav-menu" id="navMenu">
+                <a href="#" class="nav-link" onclick="showDashboard()">Dashboard</a>
+                <a href="#" class="nav-link" onclick="showOpportunities()">Opportunities</a>
+                <a href="#" class="nav-link" onclick="showStats()">Statistics</a>
+                <a href="#" class="nav-link" onclick="logout()">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Auth Section -->
+    <div id="authSection" class="auth-section">
+        <div class="auth-container">
+            <div class="auth-tabs">
+                <button class="tab-btn active" onclick="showLogin()">Login</button>
+                <button class="tab-btn" onclick="showRegister()">Register</button>
+            </div>
+            
+            <!-- Login Form -->
+            <div id="loginForm" class="auth-form">
+                <h2>Login</h2>
+                <form onsubmit="login(event)">
+                    <div class="form-group">
+                        <input type="email" id="loginEmail" placeholder="Email" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="loginPassword" placeholder="Password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Login</button>
+                </form>
+            </div>
+
+            <!-- Register Form -->
+            <div id="registerForm" class="auth-form" style="display: none;">
+                <h2>Register</h2>
+                <form onsubmit="register(event)">
+                    <div class="form-group">
+                        <input type="email" id="registerEmail" placeholder="Email" required>
+                    </div>
+                    <div class="form-group">
+                        <input type="password" id="registerPassword" placeholder="Password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Register</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="mainApp" class="main-app" style="display: none;">
+        <!-- Dashboard -->
+        <div id="dashboardSection" class="section">
+            <div class="section-header">
+                <h2>Dashboard</h2>
+                <button class="btn btn-primary" onclick="showAddOpportunityModal()">Add Opportunity</button>
+            </div>
+            
+            <!-- Quick Stats -->
+            <div class="stats-grid" id="quickStats">
+                <!-- Stats will be populated by JavaScript -->
+            </div>
+
+            <!-- Upcoming Deadlines -->
+            <div class="card">
+                <h3>Upcoming Deadlines</h3>
+                <div id="upcomingDeadlines">
+                    <!-- Deadlines will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Opportunities Section -->
+        <div id="opportunitiesSection" class="section" style="display: none;">
+            <div class="section-header">
+                <h2>Opportunities</h2>
+                <button class="btn btn-primary" onclick="showAddOpportunityModal()">Add Opportunity</button>
+            </div>
+
+            <!-- Filters -->
+            <div class="filters">
+                <select id="statusFilter" onchange="filterOpportunities()">
+                    <option value="">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="submitted">Submitted</option>
+                    <option value="interview">Interview</option>
+                    <option value="offered">Offered</option>
+                    <option value="rejected">Rejected</option>
+                </select>
+                <select id="categoryFilter" onchange="filterOpportunities()">
+                    <option value="">All Categories</option>
+                    <option value="scholarship">Scholarship</option>
+                    <option value="graduate_school">Graduate School</option>
+                    <option value="conference">Conference</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+
+            <!-- Opportunities List -->
+            <div id="opportunitiesList">
+                <!-- Opportunities will be populated by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Statistics Section -->
+        <div id="statisticsSection" class="section" style="display: none;">
+            <div class="section-header">
+                <h2>Statistics</h2>
+            </div>
+            <div id="detailedStats">
+                <!-- Detailed stats will be populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Opportunity Modal -->
+    <div id="addOpportunityModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Add Opportunity</h3>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <form id="opportunityForm" onsubmit="saveOpportunity(event)">
+                <div class="form-group">
+                    <label for="title">Title *</label>
+                    <input type="text" id="title" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <textarea id="description" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category *</label>
+                    <select id="category" required>
+                        <option value="">Select Category</option>
+                        <option value="scholarship">Scholarship</option>
+                        <option value="graduate_school">Graduate School</option>
+                        <option value="conference">Conference</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="deadline">Deadline *</label>
+                    <input type="date" id="deadline" required>
+                </div>
+                <div class="form-group">
+                    <label for="status">Status</label>
+                    <select id="status">
+                        <option value="pending">Pending</option>
+                        <option value="submitted">Submitted</option>
+                        <option value="interview">Interview</option>
+                        <option value="offered">Offered</option>
+                        <option value="rejected">Rejected</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner" style="display: none;">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Toast Messages -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
