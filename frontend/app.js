@@ -506,6 +506,14 @@ function displayDetailedStats(stats) {
                     <div class="stat-label">Conferences</div>
                 </div>
                 <div class="stat-card">
+                    <div class="stat-number">${stats.byCategory.internship}</div>
+                    <div class="stat-label">Conferences</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${stats.byCategory.job}</div>
+                    <div class="stat-label">Conferences</div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-number">${stats.byCategory.other}</div>
                     <div class="stat-label">Other</div>
                 </div>
