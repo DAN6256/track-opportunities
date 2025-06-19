@@ -30,6 +30,7 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Middleware
+//TO DO
 app.use(cors());
 /*
 app.use(cors({
@@ -107,7 +108,7 @@ const authenticateToken = (req, res, next) => {
  *           type: string
  *         category:
  *           type: string
- *           enum: [scholarship, graduate_school, conference, other]
+ *           enum: [scholarship, graduate_school, conference, internship, job, other]
  *         deadline:
  *           type: string
  *           format: date
@@ -402,6 +403,8 @@ app.get('/api/stats', authenticateToken, async (req, res) => {
         scholarship: 0,
         graduate_school: 0,
         conference: 0,
+        internship: 0,
+        job: 0,
         other: 0,
       },
     };

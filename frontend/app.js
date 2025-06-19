@@ -224,10 +224,11 @@ function displayQuickStats(stats) {
 }
 
 function displayUpcomingDeadlines() {
+    //Changed from !== 'rejected' to === pending
     const container = document.getElementById('upcomingDeadlines');
     const today = new Date();
     const upcoming = opportunities
-        .filter(opp => new Date(opp.deadline) >= today && opp.status !== 'rejected')
+        .filter(opp => new Date(opp.deadline) >= today && opp.status === 'pending')
         .slice(0, 5);
 
     if (upcoming.length === 0) {
@@ -504,6 +505,8 @@ function formatCategory(category) {
         'scholarship': 'Scholarship',
         'graduate_school': 'Graduate School',
         'conference': 'Conference',
+        'internship': 'Internship',
+        'job': 'Job',
         'other': 'Other'
     };
     return categories[category] || category;
