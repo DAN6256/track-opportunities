@@ -507,11 +507,11 @@ function displayDetailedStats(stats) {
                 </div>
                 <div class="stat-card">
                     <div class="stat-number">${stats.byCategory.internship}</div>
-                    <div class="stat-label">Conferences</div>
+                    <div class="stat-label">Internships</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number">${stats.byCategory.job}</div>
-                    <div class="stat-label">Conferences</div>
+                    <div class="stat-label">Jobs</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-number">${stats.byCategory.other}</div>
