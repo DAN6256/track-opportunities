@@ -303,6 +303,23 @@ function displayOpportunities() {
         const daysLeft = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
         const isUrgent = daysLeft <= 7 && daysLeft >= 0;
 
+        // Determine deadline status text
+        let deadlineText;
+        if (opp.status !== 'pending') {
+            if (opp.submittedDate) {
+                const submittedDate = new Date(opp.submittedDate);
+                deadlineText = submittedDate <= deadline ? 'On Time' : 'Late';
+            } else {
+                deadlineText = 'On Time';
+            }
+        } else {
+            if (daysLeft >= 0) {
+                deadlineText = daysLeft === 0 ? 'Due Today!' : `${daysLeft} days left`;
+            } else {
+                deadlineText = 'Overdue';
+            }
+        }
+
         return `
             <div class="opportunity-card">
                 <div class="opportunity-header">
@@ -310,9 +327,8 @@ function displayOpportunities() {
                         <div class="opportunity-title">${opp.title}</div>
                         <span class="opportunity-category">${formatCategory(opp.category)}</span>
                     </div>
-                    <div class="opportunity-deadline ${isUrgent ? 'deadline-urgent' : ''}">
-                        ${formatDate(opp.deadline)}
-                        ${daysLeft >= 0 ? `(${daysLeft === 0 ? 'Due Today!' : daysLeft + ' days left'})` : '(Overdue)'}
+                    <div class="opportunity-deadline ${isUrgent && opp.status === 'pending' ? 'deadline-urgent' : ''}">
+                        ${formatDate(opp.deadline)} (${deadlineText})
                     </div>
                 </div>
                 
@@ -329,7 +345,6 @@ function displayOpportunities() {
         `;
     }).join('');
 }
-
 // Modal Functions
 function showAddOpportunityModal() {
     currentEditingId = null;
