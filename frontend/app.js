@@ -1,23 +1,273 @@
 // API Configuration
-const API_BASE_URL = 'https://track-opportunities.onrender.com/api';
+//const API_BASE_URL = 'https://track-opportunities.onrender.com/api';
+const API_BASE_URL='http://localhost:3000/api'
 
-// Global state
+// Cache Management
+class Cache {
+    constructor() {
+        this.data = new Map();
+        this.CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+    }
+
+    set(key, value) {
+        this.data.set(key, {
+            value,
+            timestamp: Date.now()
+        });
+    }
+
+    get(key) {
+        const cached = this.data.get(key);
+        if (!cached) return null;
+        
+        if (Date.now() - cached.timestamp > this.CACHE_DURATION) {
+            this.data.delete(key);
+            return null;
+        }
+        
+        return cached.value;
+    }
+
+    clear() {
+        this.data.clear();
+    }
+
+    invalidate(pattern) {
+        for (const [key] of this.data) {
+            if (key.includes(pattern)) {
+                this.data.delete(key);
+            }
+        }
+    }
+}
+
+// API Client with caching and deduplication
+class ApiClient {
+    constructor() {
+        this.cache = new Cache();
+        this.pending = new Map();
+    }
+
+    async call(endpoint, options = {}) {
+        const token = this.getToken();
+        const cacheKey = `${endpoint}-${JSON.stringify(options)}`;
+        
+        // Return cached data if available and fresh
+        const cached = this.cache.get(cacheKey);
+        if (cached && !options.skipCache) {
+            return cached;
+        }
+
+        // Deduplicate concurrent requests
+        if (this.pending.has(cacheKey)) {
+            return this.pending.get(cacheKey);
+        }
+
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            ...options.headers
+        };
+
+        const requestPromise = this.makeRequest(endpoint, { ...options, headers });
+        this.pending.set(cacheKey, requestPromise);
+
+        try {
+            const result = await requestPromise;
+            
+            // Cache successful responses
+            if (result.response.ok) {
+                this.cache.set(cacheKey, result);
+            }
+            
+            return result;
+        } catch (error) {
+            console.error('API call failed:', error);
+            throw error;
+        } finally {
+            this.pending.delete(cacheKey);
+        }
+    }
+
+    async makeRequest(endpoint, options) {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+
+        if (response.status === 401) {
+            appState.logout();
+            return null;
+        }
+
+        const data = await response.json();
+        return { response, data };
+    }
+
+    getToken() {
+        return currentUser?.token || '';
+    }
+
+    clearCache() {
+        this.cache.clear();
+    }
+
+    invalidateCache(pattern) {
+        this.cache.invalidate(pattern);
+    }
+}
+
+// State Management
+class AppState {
+    constructor() {
+        this.opportunities = [];
+        this.stats = null;
+        this.currentUser = null;
+        this.currentSection = 'dashboard';
+        this.filters = {
+            status: '',
+            category: ''
+        };
+        this.subscribers = new Map();
+        this.updateQueue = [];
+        this.updateScheduled = false;
+    }
+
+    subscribe(key, callback) {
+        if (!this.subscribers.has(key)) {
+            this.subscribers.set(key, []);
+        }
+        this.subscribers.get(key).push(callback);
+    }
+
+    notify(key) {
+        const callbacks = this.subscribers.get(key) || [];
+        callbacks.forEach(callback => {
+            try {
+                callback(this[key]);
+            } catch (error) {
+                console.error('Subscriber callback error:', error);
+            }
+        });
+    }
+
+    update(key, value) {
+        if (this[key] !== value) {
+            this[key] = value;
+            this.scheduleUpdate(key);
+        }
+    }
+
+    scheduleUpdate(key) {
+        this.updateQueue.push(key);
+        
+        if (!this.updateScheduled) {
+            this.updateScheduled = true;
+            requestAnimationFrame(() => {
+                this.processUpdateQueue();
+                this.updateScheduled = false;
+            });
+        }
+    }
+
+    processUpdateQueue() {
+        const uniqueKeys = [...new Set(this.updateQueue)];
+        this.updateQueue = [];
+        
+        uniqueKeys.forEach(key => this.notify(key));
+    }
+
+    logout() {
+        this.currentUser = null;
+        this.opportunities = [];
+        this.stats = null;
+        apiClient.clearCache();
+        showAuthSection();
+        showToast('Logged out successfully', 'success');
+    }
+}
+
+// Global instances
+const apiClient = new ApiClient();
+const appState = new AppState();
 let currentUser = null;
-let opportunities = [];
 let currentEditingId = null;
+
+// Debounced functions
+const debounce = (func, wait) => {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+};
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
-    // Check if user is logged in
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
     if (token) {
         currentUser = { token };
+        appState.currentUser = currentUser;
         showMainApp();
         loadDashboard();
     } else {
         showAuthSection();
     }
+    
+    setupEventListeners();
 });
+
+// Helper functions
+function getStoredToken() {
+    try {
+        return localStorage.getItem('token');
+    } catch (error) {
+        console.warn('localStorage not available');
+        return null;
+    }
+}
+
+function setStoredToken(token) {
+    try {
+        localStorage.setItem('token', token);
+    } catch (error) {
+        console.warn('localStorage not available');
+    }
+}
+
+function removeStoredToken() {
+    try {
+        localStorage.removeItem('token');
+    } catch (error) {
+        console.warn('localStorage not available');
+    }
+}
+
+// Event Listeners Setup
+function setupEventListeners() {
+    // Modal close handler
+    document.addEventListener('click', function(event) {
+        const modal = document.getElementById('addOpportunityModal');
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+
+    // Debounced filter handlers
+    const debouncedFilter = debounce(filterOpportunities, 300);
+    
+    const statusFilter = document.getElementById('statusFilter');
+    const categoryFilter = document.getElementById('categoryFilter');
+    
+    if (statusFilter) {
+        statusFilter.addEventListener('change', debouncedFilter);
+    }
+    
+    if (categoryFilter) {
+        categoryFilter.addEventListener('change', debouncedFilter);
+    }
+}
 
 // Authentication Functions
 function showLogin() {
@@ -52,8 +302,9 @@ async function login(event) {
         const data = await response.json();
         
         if (response.ok) {
-            localStorage.setItem('token', data.token);
+            setStoredToken(data.token);
             currentUser = { token: data.token, userId: data.userId };
+            appState.currentUser = currentUser;
             showMainApp();
             loadDashboard();
             showToast('Login successful!', 'success');
@@ -85,8 +336,9 @@ async function register(event) {
         const data = await response.json();
         
         if (response.ok) {
-            localStorage.setItem('token', data.token);
+            setStoredToken(data.token);
             currentUser = { token: data.token, userId: data.userId };
+            appState.currentUser = currentUser;
             showMainApp();
             loadDashboard();
             showToast('Registration successful!', 'success');
@@ -101,11 +353,9 @@ async function register(event) {
 }
 
 function logout() {
-    localStorage.removeItem('token');
+    removeStoredToken();
     currentUser = null;
-    opportunities = [];
-    showAuthSection();
-    showToast('Logged out successfully', 'success');
+    appState.logout();
 }
 
 // Navigation Functions
@@ -120,20 +370,42 @@ function showMainApp() {
 }
 
 function showDashboard() {
+    if (appState.currentSection === 'dashboard') return;
+    
     hideAllSections();
     document.getElementById('dashboardSection').style.display = 'block';
-    loadDashboard();
+    appState.currentSection = 'dashboard';
+    
+    // Load dashboard data if not already loaded recently
+    const hasRecentData = appState.opportunities.length > 0 && appState.stats;
+    if (!hasRecentData) {
+        loadDashboard();
+    } else {
+        displayDashboardData();
+    }
 }
 
 function showOpportunities() {
+    if (appState.currentSection === 'opportunities') return;
+    
     hideAllSections();
     document.getElementById('opportunitiesSection').style.display = 'block';
-    loadOpportunities();
+    appState.currentSection = 'opportunities';
+    
+    if (appState.opportunities.length === 0) {
+        loadOpportunities();
+    } else {
+        displayOpportunities();
+    }
 }
 
 function showStats() {
+    if (appState.currentSection === 'stats') return;
+    
     hideAllSections();
     document.getElementById('statisticsSection').style.display = 'block';
+    appState.currentSection = 'stats';
+        
     loadDetailedStats();
 }
 
@@ -143,42 +415,25 @@ function hideAllSections() {
     });
 }
 
-// API Functions
-async function apiCall(endpoint, options = {}) {
-    const token = localStorage.getItem('token');
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        ...options.headers
-    };
-
-    try {
-        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-            ...options,
-            headers
-        });
-
-        if (response.status === 401) {
-            logout();
-            return null;
-        }
-
-        const data = await response.json();
-        return { response, data };
-    } catch (error) {
-        console.error('API call failed:', error);
-        throw error;
-    }
-}
-
-// Dashboard Functions
+// Dashboard Functions - Optimized with parallel loading
 async function loadDashboard() {
     showLoading();
     try {
-        // Load opportunities and stats
-        await loadOpportunities();
-        await loadQuickStats();
-        displayUpcomingDeadlines();
+        // Load opportunities and stats in parallel
+        const [opportunitiesResult, statsResult] = await Promise.all([
+            apiClient.call('/opportunities'),
+            apiClient.call('/stats')
+        ]);
+
+        if (opportunitiesResult?.response.ok) {
+            appState.opportunities = opportunitiesResult.data;
+        }
+
+        if (statsResult?.response.ok) {
+            appState.stats = statsResult.data;
+        }
+
+        displayDashboardData();
     } catch (error) {
         showToast('Failed to load dashboard', 'error');
     } finally {
@@ -186,49 +441,51 @@ async function loadDashboard() {
     }
 }
 
-async function loadQuickStats() {
-    try {
-        const result = await apiCall('/stats');
-        if (result) {
-            displayQuickStats(result.data);
-        }
-    } catch (error) {
-        console.error('Failed to load stats:', error);
+function displayDashboardData() {
+    if (appState.stats) {
+        displayQuickStats(appState.stats);
+    }
+    if (appState.opportunities.length > 0) {
+        displayUpcomingDeadlines();
     }
 }
 
 function displayQuickStats(stats) {
     const statsGrid = document.getElementById('quickStats');
+    if (!statsGrid) return;
+    
     statsGrid.innerHTML = `
         <div class="stat-card">
-            <div class="stat-number">${stats.total}</div>
+            <div class="stat-number">${stats.total || 0}</div>
             <div class="stat-label">Total Opportunities</div>
         </div>
         <div class="stat-card">
-            <div class="stat-number">${stats.pending}</div>
+            <div class="stat-number">${stats.pending || 0}</div>
             <div class="stat-label">Pending</div>
         </div>
         <div class="stat-card">
-            <div class="stat-number">${stats.submitted}</div>
+            <div class="stat-number">${stats.submitted || 0}</div>
             <div class="stat-label">Submitted</div>
         </div>
         <div class="stat-card">
-            <div class="stat-number">${stats.interview}</div>
+            <div class="stat-number">${stats.interview || 0}</div>
             <div class="stat-label">Interviews</div>
         </div>
         <div class="stat-card">
-            <div class="stat-number">${stats.offered}</div>
+            <div class="stat-number">${stats.offered || 0}</div>
             <div class="stat-label">Offers</div>
         </div>
     `;
 }
 
 function displayUpcomingDeadlines() {
-    //Changed from !== 'rejected' to === pending
     const container = document.getElementById('upcomingDeadlines');
+    if (!container) return;
+    
     const today = new Date();
-    const upcoming = opportunities
+    const upcoming = appState.opportunities
         .filter(opp => new Date(opp.deadline) >= today && opp.status === 'pending')
+        .sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
         .slice(0, 5);
 
     if (upcoming.length === 0) {
@@ -236,30 +493,37 @@ function displayUpcomingDeadlines() {
         return;
     }
 
-    container.innerHTML = upcoming.map(opp => {
+    const fragment = document.createDocumentFragment();
+    
+    upcoming.forEach(opp => {
         const deadline = new Date(opp.deadline);
         const daysLeft = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
         const isUrgent = daysLeft <= 7;
 
-        return `
-            <div class="opportunity-card">
-                <div class="opportunity-header">
-                    <div>
-                        <div class="opportunity-title">${opp.title}</div>
-                        <span class="opportunity-category">${formatCategory(opp.category)}</span>
-                    </div>
-                    <div class="opportunity-deadline ${isUrgent ? 'deadline-urgent' : ''}">
-                        ${daysLeft === 0 ? 'Due Today!' : 
-                          daysLeft === 1 ? 'Due Tomorrow' : 
-                          `${daysLeft} days left`}
-                    </div>
+        const oppElement = document.createElement('div');
+        oppElement.className = 'opportunity-card';
+        oppElement.innerHTML = `
+            <div class="opportunity-header">
+                <div>
+                    <div class="opportunity-title">${escapeHtml(opp.title)}</div>
+                    <span class="opportunity-category">${formatCategory(opp.category)}</span>
+                </div>
+                <div class="opportunity-deadline ${isUrgent ? 'deadline-urgent' : ''}">
+                    ${daysLeft === 0 ? 'Due Today!' : 
+                      daysLeft === 1 ? 'Due Tomorrow' : 
+                      `${daysLeft} days left`}
                 </div>
             </div>
         `;
-    }).join('');
+        
+        fragment.appendChild(oppElement);
+    });
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
 }
 
-// Opportunities Functions
+// Opportunities Functions - Optimized with better filtering
 async function loadOpportunities() {
     try {
         const statusFilter = document.getElementById('statusFilter')?.value || '';
@@ -274,9 +538,9 @@ async function loadOpportunities() {
             endpoint += `?${params.toString()}`;
         }
 
-        const result = await apiCall(endpoint);
-        if (result) {
-            opportunities = result.data;
+        const result = await apiClient.call(endpoint);
+        if (result?.response.ok) {
+            appState.opportunities = result.data;
             displayOpportunities();
         }
     } catch (error) {
@@ -286,8 +550,9 @@ async function loadOpportunities() {
 
 function displayOpportunities() {
     const container = document.getElementById('opportunitiesList');
+    if (!container) return;
     
-    if (opportunities.length === 0) {
+    if (appState.opportunities.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
                 <h3>No opportunities found</h3>
@@ -297,13 +562,15 @@ function displayOpportunities() {
         return;
     }
 
-    container.innerHTML = opportunities.map(opp => {
+    // Use document fragment for better performance
+    const fragment = document.createDocumentFragment();
+    const today = new Date();
+
+    appState.opportunities.forEach(opp => {
         const deadline = new Date(opp.deadline);
-        const today = new Date();
         const daysLeft = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
         const isUrgent = daysLeft <= 7 && daysLeft >= 0;
 
-        // Determine deadline status text
         let deadlineText;
         if (opp.status !== 'pending') {
             if (opp.submittedDate) {
@@ -320,31 +587,41 @@ function displayOpportunities() {
             }
         }
 
-        return `
-            <div class="opportunity-card">
-                <div class="opportunity-header">
-                    <div>
-                        <div class="opportunity-title">${opp.title}</div>
-                        <span class="opportunity-category">${formatCategory(opp.category)}</span>
-                    </div>
-                    <div class="opportunity-deadline ${isUrgent && opp.status === 'pending' ? 'deadline-urgent' : ''}">
-                        ${formatDate(opp.deadline)} (${deadlineText})
-                    </div>
-                </div>
-                
-                ${opp.description ? `<div class="opportunity-description">${opp.description}</div>` : ''}
-                
-                <div class="opportunity-details">
-                    <span class="opportunity-status status-${opp.status}">${formatStatus(opp.status)}</span>
-                    <div class="opportunity-actions">
-                        <button class="btn btn-small btn-primary" onclick="editOpportunity('${opp.id}')">Edit</button>
-                        <button class="btn btn-small btn-danger" onclick="deleteOpportunity('${opp.id}')">Delete</button>
-                    </div>
-                </div>
-            </div>
-        `;
-    }).join('');
+        const oppElement = document.createElement('div');
+        oppElement.className = 'opportunity-card';
+        oppElement.innerHTML = createOpportunityCardHTML(opp, deadline, deadlineText, isUrgent);
+        
+        fragment.appendChild(oppElement);
+    });
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
 }
+
+function createOpportunityCardHTML(opp, deadline, deadlineText, isUrgent) {
+    return `
+        <div class="opportunity-header">
+            <div>
+                <div class="opportunity-title">${escapeHtml(opp.title)}</div>
+                <span class="opportunity-category">${formatCategory(opp.category)}</span>
+            </div>
+            <div class="opportunity-deadline ${isUrgent && opp.status === 'pending' ? 'deadline-urgent' : ''}">
+                ${formatDate(deadline.toISOString())} (${deadlineText})
+            </div>
+        </div>
+        
+        ${opp.description ? `<div class="opportunity-description">${escapeHtml(opp.description)}</div>` : ''}
+        
+        <div class="opportunity-details">
+            <span class="opportunity-status status-${opp.status}">${formatStatus(opp.status)}</span>
+            <div class="opportunity-actions">
+                <button class="btn btn-small btn-primary" onclick="editOpportunity('${opp.id}')">Edit</button>
+                <button class="btn btn-small btn-danger" onclick="deleteOpportunity('${opp.id}')">Delete</button>
+            </div>
+        </div>
+    `;
+}
+
 // Modal Functions
 function showAddOpportunityModal() {
     currentEditingId = null;
@@ -355,7 +632,7 @@ function showAddOpportunityModal() {
 }
 
 function editOpportunity(id) {
-    const opportunity = opportunities.find(opp => opp.id === id);
+    const opportunity = appState.opportunities.find(opp => opp.id === id);
     if (!opportunity) return;
 
     currentEditingId = id;
@@ -377,33 +654,53 @@ async function saveOpportunity(event) {
     event.preventDefault();
     
     const opportunityData = {
-        title: document.getElementById('title').value,
-        description: document.getElementById('description').value,
+        title: document.getElementById('title').value.trim(),
+        description: document.getElementById('description').value.trim(),
         category: document.getElementById('category').value,
         deadline: document.getElementById('deadline').value,
         status: document.getElementById('status').value,
     };
 
+    // Client-side validation
+    if (!opportunityData.title || !opportunityData.category || !opportunityData.deadline) {
+        showToast('Please fill in all required fields', 'error');
+        return;
+    }
+
     showLoading();
     try {
         let result;
         if (currentEditingId) {
-            result = await apiCall(`/opportunities/${currentEditingId}`, {
+            result = await apiClient.call(`/opportunities/${currentEditingId}`, {
                 method: 'PUT',
-                body: JSON.stringify(opportunityData)
+                body: JSON.stringify(opportunityData),
+                skipCache: true
             });
         } else {
-            result = await apiCall('/opportunities', {
+            result = await apiClient.call('/opportunities', {
                 method: 'POST',
-                body: JSON.stringify(opportunityData)
+                body: JSON.stringify(opportunityData),
+                skipCache: true
             });
         }
 
-        if (result && result.response.ok) {
+        if (result?.response.ok) {
             closeModal();
-            await loadOpportunities();
-            await loadQuickStats();
-            displayUpcomingDeadlines();
+            
+            // Invalidate relevant caches
+            apiClient.invalidateCache('opportunities');
+            apiClient.invalidateCache('stats');
+            
+            // Refresh data
+            await Promise.all([
+                loadOpportunities(),
+                loadQuickStats()
+            ]);
+            
+            if (appState.currentSection === 'dashboard') {
+                displayUpcomingDeadlines();
+            }
+            
             showToast(currentEditingId ? 'Opportunity updated!' : 'Opportunity added!', 'success');
         } else {
             showToast(result?.data?.error || 'Failed to save opportunity', 'error');
@@ -420,14 +717,26 @@ async function deleteOpportunity(id) {
 
     showLoading();
     try {
-        const result = await apiCall(`/opportunities/${id}`, {
-            method: 'DELETE'
+        const result = await apiClient.call(`/opportunities/${id}`, {
+            method: 'DELETE',
+            skipCache: true
         });
 
-        if (result && result.response.ok) {
-            await loadOpportunities();
-            await loadQuickStats();
-            displayUpcomingDeadlines();
+        if (result?.response.ok) {
+            // Invalidate relevant caches
+            apiClient.invalidateCache('opportunities');
+            apiClient.invalidateCache('stats');
+            
+            // Refresh data
+            await Promise.all([
+                loadOpportunities(),
+                loadQuickStats()
+            ]);
+            
+            if (appState.currentSection === 'dashboard') {
+                displayUpcomingDeadlines();
+            }
+            
             showToast('Opportunity deleted!', 'success');
         } else {
             showToast(result?.data?.error || 'Failed to delete opportunity', 'error');
@@ -439,53 +748,94 @@ async function deleteOpportunity(id) {
     }
 }
 
-// Filter Functions
-function filterOpportunities() {
+// Filter Functions - Debounced
+const filterOpportunities = debounce(() => {
+    const statusFilter = document.getElementById('statusFilter')?.value || '';
+    const categoryFilter = document.getElementById('categoryFilter')?.value || '';
+    
+    appState.filters = { status: statusFilter, category: categoryFilter };
     loadOpportunities();
-}
+}, 300);
 
 // Statistics Functions
 async function loadDetailedStats() {
     showLoading();
     try {
-        const result = await apiCall('/stats');
-        if (result) {
+        const result = await apiClient.call('/stats');
+        if (result?.response.ok && result.data) {
+            appState.stats = result.data;
             displayDetailedStats(result.data);
+        } else {
+            // Handle case where stats endpoint returns empty or error
+            console.error('Stats API returned:', result);
+            showToast('No statistics data available', 'warning');
+            displayEmptyStats();
         }
     } catch (error) {
+        console.error('Failed to load statistics:', error);
         showToast('Failed to load statistics', 'error');
+        displayEmptyStats();
     } finally {
         hideLoading();
     }
 }
 
+async function loadQuickStats() {
+    try {
+        const result = await apiClient.call('/stats');
+        if (result?.response.ok) {
+            appState.stats = result.data;
+            if (appState.currentSection === 'dashboard') {
+                displayQuickStats(result.data);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to load stats:', error);
+    }
+}
+
 function displayDetailedStats(stats) {
     const container = document.getElementById('detailedStats');
+    if (!container) {
+        console.error('detailedStats container not found');
+        return;
+    }
+    
+    // Ensure stats object has default values
+    const safeStats = {
+        total: stats?.total || 0,
+        pending: stats?.pending || 0,
+        submitted: stats?.submitted || 0,
+        interview: stats?.interview || 0,
+        offered: stats?.offered || 0,
+        rejected: stats?.rejected || 0,
+        byCategory: stats?.byCategory || {}
+    };
     
     container.innerHTML = `
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-number">${stats.total}</div>
+                <div class="stat-number">${safeStats.total}</div>
                 <div class="stat-label">Total Opportunities</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${stats.pending}</div>
+                <div class="stat-number">${safeStats.pending}</div>
                 <div class="stat-label">Pending</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${stats.submitted}</div>
+                <div class="stat-number">${safeStats.submitted}</div>
                 <div class="stat-label">Submitted</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${stats.interview}</div>
+                <div class="stat-number">${safeStats.interview}</div>
                 <div class="stat-label">Interviews</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${stats.offered}</div>
+                <div class="stat-number">${safeStats.offered}</div>
                 <div class="stat-label">Offers Received</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">${stats.rejected}</div>
+                <div class="stat-number">${safeStats.rejected}</div>
                 <div class="stat-label">Rejections</div>
             </div>
         </div>
@@ -494,34 +844,60 @@ function displayDetailedStats(stats) {
             <h3>By Category</h3>
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="stat-number">${stats.byCategory.scholarship}</div>
+                    <div class="stat-number">${safeStats.byCategory.scholarship || 0}</div>
                     <div class="stat-label">Scholarships</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number">${stats.byCategory.graduate_school}</div>
+                    <div class="stat-number">${safeStats.byCategory.graduate_school || 0}</div>
                     <div class="stat-label">Graduate School</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number">${stats.byCategory.conference}</div>
+                    <div class="stat-number">${safeStats.byCategory.conference || 0}</div>
                     <div class="stat-label">Conferences</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number">${stats.byCategory.internship}</div>
+                    <div class="stat-number">${safeStats.byCategory.internship || 0}</div>
                     <div class="stat-label">Internships</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number">${stats.byCategory.job}</div>
+                    <div class="stat-number">${safeStats.byCategory.job || 0}</div>
                     <div class="stat-label">Jobs</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number">${stats.byCategory.other}</div>
+                    <div class="stat-number">${safeStats.byCategory.other || 0}</div>
                     <div class="stat-label">Other</div>
                 </div>
             </div>
         </div>
+
+        ${safeStats.total === 0 ? `
+        <div class="empty-state">
+            <h3>No Statistics Available</h3>
+            <p>Add some opportunities to see your statistics!</p>
+        </div>
+        ` : ''}
     `;
 }
 
+function displayEmptyStats() {
+    const container = document.getElementById('detailedStats');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <div class="empty-state">
+            <h3>Unable to Load Statistics</h3>
+            <p>There was an error loading your statistics. Please try refreshing the page.</p>
+            <button class="btn btn-primary" onclick="loadDetailedStats()">Retry</button>
+        </div>
+    `;
+}
+
+function debugStats() {
+    console.log('Current app state:', appState);
+    console.log('Statistics container exists:', !!document.getElementById('detailedStats'));
+    console.log('Current section:', appState.currentSection);
+    console.log('Statistics section visible:', document.getElementById('statisticsSection')?.style.display);
+}
 // Utility Functions
 function formatCategory(category) {
     const categories = {
@@ -547,22 +923,52 @@ function formatStatus(status) {
 }
 
 function formatDate(dateString) {
-    return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-    });
+    try {
+        return new Date(dateString).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    } catch (error) {
+        return 'Invalid Date';
+    }
 }
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+let loadingCount = 0;
+
 function showLoading() {
+    loadingCount++;
     document.getElementById('loadingSpinner').style.display = 'flex';
 }
 
 function hideLoading() {
-    document.getElementById('loadingSpinner').style.display = 'none';
+    loadingCount = Math.max(0, loadingCount - 1);
+    if (loadingCount === 0) {
+        document.getElementById('loadingSpinner').style.display = 'none';
+    }
 }
 
+// Toast system with queue
+const toastQueue = [];
+let isShowingToast = false;
+
 function showToast(message, type = 'info') {
+    toastQueue.push({ message, type });
+    processToastQueue();
+}
+
+function processToastQueue() {
+    if (isShowingToast || toastQueue.length === 0) return;
+    
+    isShowingToast = true;
+    const { message, type } = toastQueue.shift();
+    
     const container = document.getElementById('toastContainer');
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
@@ -572,13 +978,7 @@ function showToast(message, type = 'info') {
     
     setTimeout(() => {
         toast.remove();
+        isShowingToast = false;
+        processToastQueue(); // Process next toast in queue
     }, 5000);
-}
-
-// Event Listeners
-window.onclick = function(event) {
-    const modal = document.getElementById('addOpportunityModal');
-    if (event.target === modal) {
-        closeModal();
-    }
 }
