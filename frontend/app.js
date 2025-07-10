@@ -476,7 +476,7 @@ function displayQuickStats(stats) {
         </div>
         <div class="stat-card">
             <div class="stat-number">${stats.rejected || 0}</div>
-            <div class="stat-label">Offers</div>
+            <div class="stat-label">Rejections</div>
         </div>
     `;
 }
