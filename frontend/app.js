@@ -1,6 +1,5 @@
 // API Configuration
 const API_BASE_URL = 'https://track-opportunities.onrender.com/api';
-//const API_BASE_URL='http://localhost:3000/api'
 
 // Cache Management
 class Cache {
@@ -473,6 +472,10 @@ function displayQuickStats(stats) {
         </div>
         <div class="stat-card">
             <div class="stat-number">${stats.offered || 0}</div>
+            <div class="stat-label">Offers</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">${stats.rejected || 0}</div>
             <div class="stat-label">Offers</div>
         </div>
     `;
