@@ -1,6 +1,5 @@
 // API Configuration
 const API_BASE_URL = 'https://track-opportunities.onrender.com/api';
-//const API_BASE_URL ='http:localhost:3000'
 
 // Cache Management
 class Cache {
@@ -38,150 +37,6 @@ class Cache {
                 this.data.delete(key);
             }
         }
-    }
-}
-
-// Email Reminder Scheduler Class
-class EmailReminderScheduler {
-    constructor() {
-        this.intervalId = null;
-        this.lastReminderDate = this.getLastReminderDate();
-        this.isRunning = false;
-    }
-
-    start() {
-        if (this.isRunning) return;
-        
-        this.isRunning = true;
-        console.log('Email reminder scheduler started');
-        
-        // Check immediately if we missed today's reminder
-        this.checkAndSendReminders();
-        
-        // Set interval to check every minute
-        this.intervalId = setInterval(() => {
-            this.checkAndSendReminders();
-        }, 60000); // Check every minute
-    }
-
-    stop() {
-        if (this.intervalId) {
-            clearInterval(this.intervalId);
-            this.intervalId = null;
-        }
-        this.isRunning = false;
-        console.log('Email reminder scheduler stopped');
-    }
-
-    async checkAndSendReminders() {
-        const now = new Date();
-        const today = now.toDateString();
-        
-        // Check if it's midnight (12:00 AM) or within the first minute
-        const isNearMidnight = now.getHours() === 0 && now.getMinutes() === 0;
-        
-        // Also check if we haven't sent reminders today (in case app was offline at midnight)
-        const hasntSentToday = this.lastReminderDate !== today;
-        
-        if ((isNearMidnight || hasntSentToday) && currentUser?.token) {
-            await this.sendDailyReminders();
-        }
-    }
-
-    async sendDailyReminders() {
-        const today = new Date().toDateString();
-        
-        // Prevent duplicate sends on the same day
-        if (this.lastReminderDate === today) {
-            return;
-        }
-
-        try {
-            console.log('Sending daily email reminders...');
-            
-            const result = await apiClient.call('/send-deadline-reminders', {
-                method: 'POST',
-                skipCache: true
-            });
-
-            if (result?.response.ok) {
-                this.lastReminderDate = today;
-                this.saveLastReminderDate(today);
-                
-                const { emailsSent, usersNotified } = result.data;
-                console.log(`Daily reminders sent: ${emailsSent} emails to ${usersNotified} users`);
-                
-                // Show toast only if emails were actually sent
-                if (emailsSent > 0) {
-                    showToast(`Daily reminders sent: ${emailsSent} emails`, 'success');
-                }
-            } else {
-                console.error('Failed to send daily reminders:', result?.data);
-                showToast('Failed to send daily reminders', 'error');
-            }
-        } catch (error) {
-            console.error('Error sending daily reminders:', error);
-            showToast('Error sending daily reminders', 'error');
-        }
-    }
-
-    getLastReminderDate() {
-        try {
-            return localStorage.getItem('lastReminderDate') || '';
-        } catch (error) {
-            console.warn('localStorage not available for reminder tracking');
-            return '';
-        }
-    }
-
-    saveLastReminderDate(date) {
-        try {
-            localStorage.setItem('lastReminderDate', date);
-        } catch (error) {
-            console.warn('localStorage not available for reminder tracking');
-        }
-    }
-
-    // Manual trigger for testing
-    async triggerManualReminder() {
-        try {
-            console.log('Manually triggering email reminders...');
-            showLoading();
-            
-            const result = await apiClient.call('/send-deadline-reminders', {
-                method: 'POST',
-                skipCache: true
-            });
-
-            if (result?.response.ok) {
-                const { emailsSent, usersNotified } = result.data;
-                showToast(`Manual reminders sent: ${emailsSent} emails to ${usersNotified} users`, 'success');
-                console.log(`Manual reminders sent: ${emailsSent} emails to ${usersNotified} users`);
-            } else {
-                showToast(result?.data?.error || 'Failed to send reminders', 'error');
-            }
-        } catch (error) {
-            console.error('Error sending manual reminders:', error);
-            showToast('Error sending reminders', 'error');
-        } finally {
-            hideLoading();
-        }
-    }
-
-    getStatus() {
-        return {
-            isRunning: this.isRunning,
-            lastReminderDate: this.lastReminderDate,
-            nextCheck: this.getNextMidnight()
-        };
-    }
-
-    getNextMidnight() {
-        const now = new Date();
-        const nextMidnight = new Date(now);
-        nextMidnight.setDate(now.getDate() + 1);
-        nextMidnight.setHours(0, 0, 0, 0);
-        return nextMidnight;
     }
 }
 
@@ -323,7 +178,6 @@ class AppState {
         this.opportunities = [];
         this.stats = null;
         apiClient.clearCache();
-        emailScheduler.stop(); // Stop email scheduler on logout
         showAuthSection();
         showToast('Logged out successfully', 'success');
     }
@@ -332,7 +186,6 @@ class AppState {
 // Global instances
 const apiClient = new ApiClient();
 const appState = new AppState();
-const emailScheduler = new EmailReminderScheduler();
 let currentUser = null;
 let currentEditingId = null;
 
@@ -357,34 +210,12 @@ document.addEventListener('DOMContentLoaded', function() {
         appState.currentUser = currentUser;
         showMainApp();
         loadDashboard();
-        
-        // Start email scheduler when user is authenticated
-        emailScheduler.start();
     } else {
         showAuthSection();
     }
     
     setupEventListeners();
-    
-    // Add visibility change listener to handle when tab becomes active/inactive
-    document.addEventListener('visibilitychange', handleVisibilityChange);
 });
-
-// Handle page visibility changes
-function handleVisibilityChange() {
-    if (document.hidden) {
-        // Page is now hidden/inactive
-        console.log('Page became inactive');
-    } else {
-        // Page is now visible/active
-        console.log('Page became active');
-        
-        // Check if we need to send missed reminders when page becomes active
-        if (currentUser?.token) {
-            emailScheduler.checkAndSendReminders();
-        }
-    }
-}
 
 // Helper functions
 function getStoredToken() {
@@ -435,27 +266,6 @@ function setupEventListeners() {
     if (categoryFilter) {
         categoryFilter.addEventListener('change', debouncedFilter);
     }
-
-    // Add keyboard shortcuts for testing
-    document.addEventListener('keydown', function(event) {
-        // Ctrl+Shift+R to manually trigger reminders (for testing)
-        if (event.ctrlKey && event.shiftKey && event.key === 'R') {
-            event.preventDefault();
-            if (currentUser?.token) {
-                emailScheduler.triggerManualReminder();
-            } else {
-                showToast('Please log in to send reminders', 'warning');
-            }
-        }
-        
-        // Ctrl+Shift+S to show scheduler status (for debugging)
-        if (event.ctrlKey && event.shiftKey && event.key === 'S') {
-            event.preventDefault();
-            const status = emailScheduler.getStatus();
-            console.log('Email Scheduler Status:', status);
-            showToast(`Scheduler ${status.isRunning ? 'running' : 'stopped'}. Last: ${status.lastReminderDate || 'never'}`, 'info');
-        }
-    });
 }
 
 // Authentication Functions
@@ -496,10 +306,6 @@ async function login(event) {
             appState.currentUser = currentUser;
             showMainApp();
             loadDashboard();
-            
-            // Start email scheduler after successful login
-            emailScheduler.start();
-            
             showToast('Login successful!', 'success');
         } else {
             showToast(data.error || 'Login failed', 'error');
@@ -534,10 +340,6 @@ async function register(event) {
             appState.currentUser = currentUser;
             showMainApp();
             loadDashboard();
-            
-            // Start email scheduler after successful registration
-            emailScheduler.start();
-            
             showToast('Registration successful!', 'success');
         } else {
             showToast(data.error || 'Registration failed', 'error');
@@ -1098,27 +900,7 @@ function debugStats() {
     console.log('Statistics container exists:', !!document.getElementById('detailedStats'));
     console.log('Current section:', appState.currentSection);
     console.log('Statistics section visible:', document.getElementById('statisticsSection')?.style.display);
-    console.log('Email scheduler status:', emailScheduler.getStatus());
 }
-
-// Email reminder utility functions
-function showEmailReminderStatus() {
-    const status = emailScheduler.getStatus();
-    const statusMessage = `
-        Email Reminder Scheduler Status:
-        - Running: ${status.isRunning ? 'Yes' : 'No'}
-        - Last Reminder Sent: ${status.lastReminderDate || 'Never'}
-        - Next Check: ${status.nextCheck.toLocaleString()}
-        
-        Manual Controls:
-        - Ctrl+Shift+R: Send reminders now
-        - Ctrl+Shift+S: Show this status
-    `;
-    
-    console.log(statusMessage);
-    showToast(`Scheduler ${status.isRunning ? 'running' : 'stopped'}`, 'info');
-}
-
 // Utility Functions
 function formatCategory(category) {
     const categories = {
@@ -1202,32 +984,4 @@ function processToastQueue() {
         isShowingToast = false;
         processToastQueue(); // Process next toast in queue
     }, 5000);
-}
-
-// Global error handler for uncaught errors
-window.addEventListener('error', function(event) {
-    console.error('Global error:', event.error);
-    showToast('An unexpected error occurred', 'error');
-});
-
-// Global handler for unhandled promise rejections
-window.addEventListener('unhandledrejection', function(event) {
-    console.error('Unhandled promise rejection:', event.reason);
-    showToast('Network or processing error', 'error');
-    event.preventDefault(); // Prevent the default browser behavior
-});
-
-// Cleanup when page is about to unload
-window.addEventListener('beforeunload', function() {
-    emailScheduler.stop();
-});
-
-// Export functions for testing (if needed)
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {
-        EmailReminderScheduler,
-        apiClient,
-        appState,
-        emailScheduler
-    };
 }

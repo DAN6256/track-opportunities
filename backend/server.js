@@ -6,7 +6,7 @@ const bcrypt = require('bcryptjs');
 const admin = require('firebase-admin');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
- 
+const nodemailer = require('nodemailer');
 
 admin.initializeApp({
   credential: admin.credential.cert({
@@ -28,6 +28,15 @@ const db = admin.database();
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Email configuration
+const transporter = nodemailer.createTransport({
+  service: 'gmail', 
+  auth: {
+    user: process.env.EMAIL_USER, 
+    pass: process.env.EMAIL_PASS  
+  }
+});
 
 // Middleware
 //TO DO
@@ -78,6 +87,183 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
+// Email template function
+const generateEmailTemplate = (userName, opportunities) => {
+  const formatDate = (dateStr) => {
+    return new Date(dateStr).toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const getDaysUntilDeadline = (deadline) => {
+    const today = new Date();
+    const deadlineDate = new Date(deadline);
+    const diffTime = deadlineDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays;
+  };
+
+  const opportunityRows = opportunities.map(opp => {
+    const daysLeft = getDaysUntilDeadline(opp.deadline);
+    const urgencyClass = daysLeft <= 2 ? 'urgent' : daysLeft <= 5 ? 'warning' : 'normal';
+    
+    return `
+      <tr>
+        <td style="padding: 15px; border-bottom: 1px solid #e0e0e0;">
+          <div>
+            <h3 style="margin: 0 0 8px 0; color: #2c3e50; font-size: 18px;">${opp.title}</h3>
+            <p style="margin: 0 0 8px 0; color: #7f8c8d; font-size: 14px;">${opp.description || 'No description provided'}</p>
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+              <span style="background: #3498db; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; text-transform: uppercase;">
+                ${opp.category.replace('_', ' ')}
+              </span>
+              <span class="${urgencyClass}" style="font-weight: bold; font-size: 14px; 
+                color: ${urgencyClass === 'urgent' ? '#e74c3c' : urgencyClass === 'warning' ? '#f39c12' : '#27ae60'};">
+                ${daysLeft === 0 ? 'Due Today!' : daysLeft === 1 ? '1 day left' : `${daysLeft} days left`}
+              </span>
+              <span style="color: #95a5a6; font-size: 13px;">Due: ${formatDate(opp.deadline)}</span>
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Opportunity Deadline Reminder</title>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                margin: 0;
+                padding: 0;
+                background-color: #f8f9fa;
+            }
+            .container {
+                max-width: 600px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 10px;
+                box-shadow: 0 0 20px rgba(0,0,0,0.1);
+                overflow: hidden;
+            }
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 30px;
+                text-align: center;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 28px;
+                font-weight: 300;
+            }
+            .header p {
+                margin: 10px 0 0 0;
+                opacity: 0.9;
+                font-size: 16px;
+            }
+            .content {
+                padding: 0;
+            }
+            .greeting {
+                padding: 30px;
+                background: #f8f9fa;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            .greeting h2 {
+                margin: 0 0 10px 0;
+                color: #2c3e50;
+                font-size: 22px;
+            }
+            .greeting p {
+                margin: 0;
+                color: #7f8c8d;
+                font-size: 16px;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .footer {
+                padding: 30px;
+                background: #2c3e50;
+                color: white;
+                text-align: center;
+            }
+            .footer p {
+                margin: 0;
+                opacity: 0.8;
+            }
+            .cta-button {
+                display: inline-block;
+                background: #3498db;
+                color: white;
+                padding: 12px 30px;
+                text-decoration: none;
+                border-radius: 5px;
+                margin: 20px 0;
+                font-weight: bold;
+                transition: background 0.3s;
+            }
+            .cta-button:hover {
+                background: #2980b9;
+            }
+            @media (max-width: 600px) {
+                .container {
+                    margin: 10px;
+                    border-radius: 5px;
+                }
+                .header, .greeting, .footer {
+                    padding: 20px;
+                }
+                .header h1 {
+                    font-size: 24px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>⏰ Deadline Reminder</h1>
+                <p>Your opportunities need attention</p>
+            </div>
+            
+            <div class="content">
+                <div class="greeting">
+                    <h2>Hello ${userName}!</h2>
+                    <p>You have ${opportunities.length} pending ${opportunities.length === 1 ? 'opportunity' : 'opportunities'} with upcoming deadlines. Don't let these slip by!</p>
+                </div>
+                
+                <table>
+                    ${opportunityRows}
+                </table>
+                
+                <div style="padding: 30px; text-align: center; background: #f8f9fa;">
+                    <p style="margin: 0 0 20px 0; color: #7f8c8d;">Ready to take action on your opportunities?</p>
+                    <a href="https://track-opportunities.onrender.com" class="cta-button">View Dashboard</a>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <p>© 2025 Opportunity Tracker. Keep chasing your dreams! 🚀</p>
+                <p style="font-size: 12px; margin-top: 10px;">This is an automated reminder. Please do not reply to this email.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+  `;
+};
 
 /**
  * @swagger
@@ -257,6 +443,7 @@ app.get('/api/opportunities', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+
 app.post('/api/opportunities', authenticateToken, async (req, res) => {
   try {
     const { title, description = '', category, deadline } = req.body;
@@ -361,8 +548,6 @@ app.put('/api/opportunities/:id', authenticateToken, async (req, res) => {
   }
 });
 
-
-
 app.delete('/api/opportunities/:id', authenticateToken, async (req, res) => {
   try {
     const snapshot = await db.ref(`opportunities/${req.params.id}`).once('value');
@@ -377,7 +562,6 @@ app.delete('/api/opportunities/:id', authenticateToken, async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
-
 
 /**
  * @swagger
@@ -420,6 +604,114 @@ app.get('/api/stats', authenticateToken, async (req, res) => {
     res.json(stats);
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/send-deadline-reminders:
+ *   post:
+ *     summary: Send email reminders for pending opportunities with deadlines within a week
+ *     tags: [Email Reminders]
+ *     responses:
+ *       200:
+ *         description: Reminders sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 emailsSent:
+ *                   type: number
+ *                 usersNotified:
+ *                   type: number
+ *       500:
+ *         description: Server error
+ */
+app.post('/api/send-deadline-reminders', async (req, res) => {
+  try {
+    const today = new Date();
+    const oneWeekFromNow = new Date(today.getTime() + (7 * 24 * 60 * 60 * 1000));
+    
+    // Get all opportunities
+    const opportunitiesSnapshot = await db.ref('opportunities').once('value');
+    if (!opportunitiesSnapshot.exists()) {
+      return res.json({ message: 'No opportunities found', emailsSent: 0, usersNotified: 0 });
+    }
+
+    // Get all users
+    const usersSnapshot = await db.ref('users').once('value');
+    if (!usersSnapshot.exists()) {
+      return res.json({ message: 'No users found', emailsSent: 0, usersNotified: 0 });
+    }
+
+    const opportunities = opportunitiesSnapshot.val();
+    const users = usersSnapshot.val();
+
+    // Group opportunities by user and filter for pending ones with deadlines within a week
+    const userOpportunities = {};
+    
+    Object.entries(opportunities).forEach(([oppId, oppData]) => {
+      if (oppData.status === 'pending') {
+        const deadlineDate = new Date(oppData.deadline);
+        
+        // Check if deadline is within the next week and not in the past
+        if (deadlineDate >= today && deadlineDate <= oneWeekFromNow) {
+          if (!userOpportunities[oppData.userId]) {
+            userOpportunities[oppData.userId] = [];
+          }
+          userOpportunities[oppData.userId].push({
+            id: oppId,
+            ...oppData
+          });
+        }
+      }
+    });
+
+    let emailsSent = 0;
+    const emailPromises = [];
+
+    // Send emails to users who have pending opportunities with upcoming deadlines
+    Object.entries(userOpportunities).forEach(([userId, userOpps]) => {
+      const user = users[userId];
+      if (user && user.email && userOpps.length > 0) {
+        const userName = user.email.split('@')[0]; // Use email prefix as name
+        const htmlContent = generateEmailTemplate(userName, userOpps);
+        
+        const mailOptions = {
+          from: process.env.EMAIL_USER,
+          to: user.email,
+          subject: `⏰ ${userOpps.length} Opportunity Deadline${userOpps.length > 1 ? 's' : ''} Approaching!`,
+          html: htmlContent
+        };
+
+        const emailPromise = transporter.sendMail(mailOptions)
+          .then(() => {
+            console.log(`Reminder email sent to ${user.email}`);
+            emailsSent++;
+          })
+          .catch((error) => {
+            console.error(`Failed to send email to ${user.email}:`, error);
+          });
+
+        emailPromises.push(emailPromise);
+      }
+    });
+
+    // Wait for all emails to be sent
+    await Promise.all(emailPromises);
+
+    res.json({
+      message: 'Deadline reminders processed successfully',
+      emailsSent,
+      usersNotified: Object.keys(userOpportunities).length
+    });
+
+  } catch (error) {
+    console.error('Error sending deadline reminders:', error);
+    res.status(500).json({ error: 'Failed to send deadline reminders' });
   }
 });
 
